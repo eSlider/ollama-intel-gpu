@@ -38,7 +38,10 @@ RUN apt-get clean && \
     && rm -rf /var/log/dpkg.log* \
     && rm -rf /var/log/alternatives.log \
     && rm -rf /var/log/installer/* \
-    && rm -rf /var/log/unattended-upgrades/*
+    && rm -rf /var/log/unattended-upgrades/* \
+    && apt autoremove -y --purge \
+    && apt-get autoclean -y \
+    && rm -rf /tmp/* /var/tmp/*
 
 # Best practices
 
