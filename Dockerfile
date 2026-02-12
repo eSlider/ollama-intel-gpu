@@ -11,23 +11,23 @@ RUN apt-get update && \
       ocl-icd-libopencl1 && \
     rm -rf /var/lib/apt/lists/*
 
-# Intel GPU runtimes (release 25.18.33578.6)
+# Intel GPU runtimes (release 26.05.37020.3)
 RUN mkdir -p /tmp/gpu && cd /tmp/gpu && \
-    wget https://github.com/oneapi-src/level-zero/releases/download/v1.22.4/level-zero_1.22.4+u24.04_amd64.deb && \
-    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.11.7/intel-igc-core-2_2.11.7+19146_amd64.deb && \
-    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.11.7/intel-igc-opencl-2_2.11.7+19146_amd64.deb && \
-    wget https://github.com/intel/compute-runtime/releases/download/25.18.33578.6/intel-ocloc-dbgsym_25.18.33578.6-0_amd64.ddeb && \
-    wget https://github.com/intel/compute-runtime/releases/download/25.18.33578.6/intel-ocloc_25.18.33578.6-0_amd64.deb && \
-    wget https://github.com/intel/compute-runtime/releases/download/25.18.33578.6/intel-opencl-icd_25.18.33578.6-0_amd64.deb && \
-    wget https://github.com/intel/compute-runtime/releases/download/25.18.33578.6/libigdgmm12_22.7.0_amd64.deb && \
-    wget https://github.com/intel/compute-runtime/releases/download/25.18.33578.6/libze-intel-gpu1_25.18.33578.6-0_amd64.deb && \
+    wget https://github.com/oneapi-src/level-zero/releases/download/v1.28.0/level-zero_1.28.0+u24.04_amd64.deb && \
+    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.28.4/intel-igc-core-2_2.28.4+20760_amd64.deb && \
+    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.28.4/intel-igc-opencl-2_2.28.4+20760_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-ocloc-dbgsym_26.05.37020.3-0_amd64.ddeb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-ocloc_26.05.37020.3-0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-opencl-icd_26.05.37020.3-0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/libigdgmm12_22.9.0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/libze-intel-gpu1_26.05.37020.3-0_amd64.deb && \
     dpkg -i *.deb *.ddeb && rm -rf /tmp/gpu
 
 # Install IPEX-LLM Portable Zip (ollama bundle v2.3.0-nightly)
 RUN cd / && \
-    wget https://github.com/ipex-llm/ipex-llm/releases/download/v2.3.0-nightly/ollama-ipex-llm-2.3.0b20250612-ubuntu.tgz && \
-    tar xvf ollama-ipex-llm-2.3.0b20250612-ubuntu.tgz --strip-components=1 -C / && \
-    rm ollama-ipex-llm-2.3.0b20250612-ubuntu.tgz
+    wget https://github.com/ipex-llm/ipex-llm/releases/download/v2.3.0-nightly/ollama-ipex-llm-2.3.0b20250725-ubuntu.tgz && \
+    tar xvf ollama-ipex-llm-2.3.0b20250725-ubuntu.tgz --strip-components=1 -C / && \
+    rm ollama-ipex-llm-2.3.0b20250725-ubuntu.tgz
 
 # Clean up any temporary files
 RUN apt-get clean && \
