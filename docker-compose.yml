@@ -8,8 +8,7 @@ services:
     container_name: ollama-intel-gpu
     restart: unless-stopped
     devices:
-      #  - /dev/dri:/dev/dri
-      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri:/dev/dri
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ollama-intel-gpu:/root/.ollama
@@ -17,7 +16,9 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - OLLAMA_HOST=0.0.0.0
-      - OLLAMA_VULKAN=1
+      - OLLAMA_DEBUG=1
+      - ONEAPI_DEVICE_SELECTOR=level_zero:0
+      - ZES_ENABLE_SYSMAN=1
       - OLLAMA_DEFAULT_KEEPALIVE=6h
       - OLLAMA_KEEP_ALIVE=24h
       - OLLAMA_MAX_LOADED_MODELS=1
