@@ -34,6 +34,17 @@ docker compose up
 
 Then launch your web browser to http://localhost:3000 to launch the web ui.  Create a local OpenWeb UI credential, then click the settings icon in the top right of the screen, then select 'Models', then click 'Show', then download a model like 'llama3.1:8b-instruct-q8_0' for Intel ARC A770 16GB VRAM
 
+### Custom `start-ollama.sh` entrypoint
+
+The upstream IPEX-LLM portable zip ships a `start-ollama.sh` that hardcodes
+`OLLAMA_HOST=127.0.0.1` and `OLLAMA_KEEP_ALIVE=10m`, preventing the container
+from accepting connections via Docker port mapping and ignoring Compose
+environment overrides.
+
+This repo includes a corrected `start-ollama.sh` (mounted read-only into the
+container) that honours environment variables set in `docker-compose.yml`,
+falling back to sensible defaults (`0.0.0.0:11434`, `24h`).
+
 ### Update to the latest IPEX-LLM Portable Zip Version
 
 To update to the latest portable zip version of IPEX-LLM's Ollama, update the compose file with the build arguments shown below, using the latest `ollama-*.tgz` release from https://github.com/intel/ipex-llm/releases/tag/v2.3.0-nightly , then rebuild the image.

@@ -15,10 +15,14 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ollama-intel-gpu:/root/.ollama
+      - ./start-ollama.sh:/start-ollama.sh:ro
+    shm_size: "16G"
     environment:
       - ONEAPI_DEVICE_SELECTOR=level_zero:0
+      #- SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
+      #- SYCL_CACHE_PERSISTENT=1
       - IPEX_LLM_NUM_CTX=16384
-      - LD_LIBRARY_PATH:/opt/intel/oneapi/compiler/2024.2/lib
+      - LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/2024.2/lib
       - DISPLAY=${DISPLAY}
       - OLLAMA_DEFAULT_KEEPALIVE="6h"
       - OLLAMA_HOST=0.0.0.0
@@ -38,7 +42,8 @@ services:
   ollama-webui:
     image: ghcr.io/open-webui/open-webui:latest
     container_name: ollama-webui
-    #volumes:
+    volumes:
+       - ./webui/data:/app/backend/data
     #  - ollama-webui:/app/backend/data
     depends_on:
       - ollama-intel-gpu
