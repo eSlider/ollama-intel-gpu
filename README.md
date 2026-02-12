@@ -6,11 +6,12 @@ A Docker-based setup that pairs [Ollama](https://github.com/ollama/ollama) **v0.
 
 **Why this exists:** Ollama's official release ships only a Vulkan backend for Intel GPUs, leaving significant performance on the table. This repo builds the `ggml-sycl` backend from source with Intel oneAPI, unlocking oneMKL, oneDNN, and Level-Zero direct GPU access.
 
-![screenshot](doc/screenshot.png)
 
 ---
 
 ## Quick start
+
+### Option A: Build from source
 
 ```shell
 git clone https://github.com/mattcurf/ollama-intel-gpu
@@ -18,9 +19,20 @@ cd ollama-intel-gpu
 docker compose up
 ```
 
-Open **http://localhost:3000** — pull a model and start chatting.
-
 The first `docker compose up` builds the SYCL backend from source (~2 min on a modern CPU). Subsequent starts are instant.
+
+### Option B: Use the pre-built image
+
+```shell
+docker run -d \
+  --device /dev/dri:/dev/dri \
+  --shm-size 16G \
+  -p 11434:11434 \
+  -v ollama-data:/root/.ollama \
+  ghcr.io/mattcurf/ollama-intel-gpu:latest
+```
+
+Open **http://localhost:3000** (with WebUI) or use the API directly at `http://localhost:11434`.
 
 > **Multiple GPUs?** Set `ONEAPI_DEVICE_SELECTOR=level_zero:0` in `docker-compose.yml` to pick the right device.
 
