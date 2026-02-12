@@ -1,20 +1,14 @@
-# Ollama for Intel GPU
+# Ollama for Intel GPU (SYCL)
 
-[![GitHub license](https://img.shields.io/github/license/mattcurf/ollama-intel-gpu)](
+> Run LLMs on Intel GPUs at full speed — no NVIDIA required.
 
-Run LLM models on your local Intel GPU using Ollama with Docker.
-Includes [Open WebUI](https://github.com/open-webui/open-webui) for a
-browser-based chat interface.
+A Docker-based setup that pairs [Ollama](https://github.com/ollama/ollama) **v0.15.6** with a custom-built **SYCL backend** for Intel GPU acceleration, plus [Open WebUI](https://github.com/open-webui/open-webui) for a browser chat interface. Three commands to go from zero to local AI.
 
-## Screenshot
+**Why this exists:** Ollama's official release ships only a Vulkan backend for Intel GPUs, leaving significant performance on the table. This repo builds the `ggml-sycl` backend from source with Intel oneAPI, unlocking oneMKL, oneDNN, and Level-Zero direct GPU access.
 
 ![screenshot](doc/screenshot.png)
 
-## Prerequisites
-
-* Ubuntu 24.04 or newer
-* Docker and Docker Compose
-* Intel GPU (tested with Intel Core Ultra 7 155H integrated Arc Graphics — Meteor Lake)
+---
 
 ## Quick start
 
@@ -24,101 +18,132 @@ cd ollama-intel-gpu
 docker compose up
 ```
 
-Then open http://localhost:3000 in your browser.
+Open **http://localhost:3000** — pull a model and start chatting.
 
-> If you have multiple GPUs (integrated + discrete), set
-> `ONEAPI_DEVICE_SELECTOR=level_zero:0` in the docker-compose environment
-> to select the intended device.
+The first `docker compose up` builds the SYCL backend from source (~2 min on a modern CPU). Subsequent starts are instant.
 
-## GPU backend: SYCL vs Vulkan
+> **Multiple GPUs?** Set `ONEAPI_DEVICE_SELECTOR=level_zero:0` in `docker-compose.yml` to pick the right device.
 
-Ollama can accelerate inference on Intel GPUs via two backends.
-This repo defaults to **SYCL** (built from upstream llama.cpp's ggml-sycl
-with Intel oneAPI) for best Intel GPU performance.
+---
 
-### Performance comparison (llama-2-7b Q4_0, llama.cpp benchmarks)
+## Tested hardware
 
-| Intel GPU | Vulkan tok/s | SYCL tok/s | SYCL advantage |
-|---------------------|-------------|------------|----------------|
-| MTL iGPU (155H) | ~8-11 | **16** | +45-100% |
-| ARL-H iGPU | ~10-12 | **17** | +40-70% |
-| Arc A770 | ~30-35 | **55** | +57-83% |
-| Flex 170 | ~30-35 | **50** | +43-67% |
-| Data Center Max 1550| — | **73** | — |
+| Intel GPU | Status |
+|-----------|--------|
+| Core Ultra 7 155H integrated Arc (Meteor Lake) | Verified |
+| Arc A-series (A770, A750, A380) | Expected compatible |
+| Data Center Flex / Max | Expected compatible |
 
-### Why SYCL is faster
+**Requirements:** Ubuntu 24.04+, Docker with Compose, Intel GPU with Level-Zero driver support.
 
-* **oneDNN** — Intel's Deep Neural Network Library for optimized GEMM (matrix multiply)
-* **oneMKL** — Intel Math Kernel Library for optimized math operations
-* **Level-zero direct access** — lower-overhead GPU communication than Vulkan
-* **Intel-specific MUL_MAT kernels** — hand-tuned for MTL, ARL, Arc, Flex, PVC architectures
-* **FP16 compute path** — optional `GGML_SYCL_F16=ON` for faster compute
-* **Multi-GPU support** — `--split-mode layer` across multiple Intel GPUs
+---
 
-### Why you might still use Vulkan
+## SYCL vs Vulkan performance
 
-* Shipped in official ollama releases — no build step required
-* Cross-vendor (Intel, AMD, NVIDIA)
-* Simpler deployment, smaller image
+Both backends run on Intel GPUs. This repo defaults to SYCL for the speed advantage.
 
-To switch to Vulkan, see the `Dockerfile.vulkan` (if provided) or use the
-official ollama Docker image with `OLLAMA_VULKAN=1`.
+| Intel GPU | Vulkan | SYCL | Gain |
+|---|---|---|---|
+| MTL iGPU (155H) | ~8-11 tok/s | **~16 tok/s** | +45-100% |
+| ARL-H iGPU | ~10-12 tok/s | **~17 tok/s** | +40-70% |
+| Arc A770 | ~30-35 tok/s | **~55 tok/s** | +57-83% |
+| Flex 170 | ~30-35 tok/s | **~50 tok/s** | +43-67% |
+| Data Center Max 1550 | — | **~73 tok/s** | — |
 
-## Architecture
+*Benchmarks: llama-2-7b Q4_0, llama.cpp, community-reported.*
 
-The Docker image builds in two stages:
+**What makes SYCL faster:**
 
-1. **Build stage** (`intel/oneapi-basekit:2025.1.1`) — clones ollama v0.15.6
-   source, fetches the matching `ggml-sycl` backend from upstream llama.cpp
-   (commit `a5bb8ba4`, the exact ggml version ollama vendors), patches two
-   ollama-specific API divergences (`batch_size` parameter, `GGML_TENSOR_FLAG_COMPUTE`
-   removal), and compiles `libggml-sycl.so` with `icpx` + oneAPI.
-2. **Runtime stage** (`ubuntu:24.04`) — minimal image with Intel GPU drivers,
-   the official ollama binary, and the SYCL runner + oneAPI runtime libraries.
+- **oneMKL / oneDNN** — Intel's optimized math and neural network libraries
+- **Level-Zero** — direct GPU communication, lower overhead than Vulkan
+- **Intel-tuned kernels** — MUL_MAT hand-optimized per architecture (MTL, ARL, Arc, Flex, PVC)
 
-### Key components
+**When Vulkan makes sense:** no build step, cross-vendor support (AMD/NVIDIA), smaller image. Use the official Ollama Docker image with `OLLAMA_VULKAN=1`.
 
-| Component | Source | Purpose |
-|-----------|--------|---------|
-| ollama binary | Official v0.15.6 release | Go server, API, model management |
-| ggml-sycl backend | llama.cpp @ `a5bb8ba4` | `libggml-sycl.so` compiled with oneAPI |
-| oneAPI runtime | Intel oneAPI 2025.1.1 | SYCL runtime, oneMKL, oneDNN, TBB |
-| GPU drivers | Intel compute-runtime 26.05 | Level-zero, IGC, OpenCL ICD |
-| patch-sycl.py | This repo | Patches ggml-sycl for ollama API compat |
-| Web UI | Open WebUI | Browser-based chat interface |
+---
+
+## How it works
+
+Ollama ships the `ggml-sycl.h` header but intentionally excludes the SYCL implementation from its vendored ggml. This repo fills that gap:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Stage 1: Build  (intel/oneapi-basekit:2025.1.1)        │
+│                                                         │
+│  ollama v0.15.6 source ──┐                              │
+│                          ├── cmake + icpx ── libggml-sycl.so
+│  ggml-sycl @ a5bb8ba4 ──┘                               │
+│        ▲                                                │
+│        └── patch-sycl.py (2 API fixes)                  │
+├─────────────────────────────────────────────────────────┤
+│  Stage 2: Runtime  (ubuntu:24.04)                       │
+│                                                         │
+│  ollama binary (official v0.15.6)                       │
+│  + libggml-sycl.so + oneAPI runtime libs                │
+│  + Intel GPU drivers (Level-Zero, IGC, compute-runtime) │
+│  + Open WebUI (separate container)                      │
+└─────────────────────────────────────────────────────────┘
+```
+
+The `ggml-sycl` source is fetched from the **exact llama.cpp commit** (`a5bb8ba4`) that ollama vendors, ensuring ABI compatibility. Two small patches are applied by `patch-sycl.py`:
+
+1. **`graph_compute` signature** — ollama adds an `int batch_size` parameter not present upstream
+2. **`GGML_TENSOR_FLAG_COMPUTE` removal** — ollama drops this enum; without the patch, every compute node gets skipped, producing garbage output
+
+---
 
 ## Configuration
 
-Key environment variables in `docker-compose.yml`:
+Environment variables in `docker-compose.yml`:
 
 | Variable | Default | Description |
-|----------|---------|-------------|
+|---|---|---|
 | `OLLAMA_HOST` | `0.0.0.0` | Listen address |
-| `OLLAMA_KEEP_ALIVE` | `24h` | Keep models loaded in memory |
-| `OLLAMA_NUM_PARALLEL` | `1` | Parallel request handling |
-| `OLLAMA_MAX_LOADED_MODELS` | `1` | Max models in memory |
-| `ONEAPI_DEVICE_SELECTOR` | `level_zero:0` | Select Intel GPU device |
+| `OLLAMA_KEEP_ALIVE` | `24h` | How long models stay loaded in memory |
+| `OLLAMA_NUM_PARALLEL` | `1` | Concurrent request slots |
+| `OLLAMA_MAX_LOADED_MODELS` | `1` | Max models in VRAM simultaneously |
+| `ONEAPI_DEVICE_SELECTOR` | `level_zero:0` | Which Intel GPU to use |
+| `ZES_ENABLE_SYSMAN` | `1` | Enable Level-Zero system management |
+| `OLLAMA_DEBUG` | `1` | Verbose logging (disable in production) |
 
-## How the SYCL build works
+---
 
-Ollama intentionally excludes `ggml-sycl` from its vendored ggml source tree
-(it keeps the header `ggml-sycl.h` but not the implementation). This repo
-rebuilds it by:
+## Project structure
 
-1. Cloning the ollama source (for the ggml build system and headers)
-2. Fetching `ggml-sycl` from the **exact llama.cpp commit** that ollama
-   vendors (`a5bb8ba4`) to ensure ABI compatibility
-3. Applying two patches via `patch-sycl.py`:
-   - **`graph_compute` signature**: ollama adds an `int batch_size` parameter
-   - **`GGML_TENSOR_FLAG_COMPUTE`**: ollama removes this enum value, so the
-     skip-check in the compute loop must be removed (otherwise ALL nodes
-     get skipped, producing garbage output)
-4. Building with Intel oneAPI `icpx` compiler, linking oneMKL and oneDNN
+```
+.
+├── Dockerfile           # Multi-stage build: oneAPI SYCL → minimal runtime
+├── docker-compose.yml   # ollama + Open WebUI services
+├── patch-sycl.py        # Patches ggml-sycl for ollama API compatibility
+├── start-ollama.sh      # Custom entrypoint (legacy, from IPEX-LLM era)
+└── doc/
+    └── screenshot.png
+```
+
+---
+
+## Troubleshooting
+
+**SYCL device not detected** — Ensure `/dev/dri` is accessible. Check `docker compose logs ollama-intel-gpu` for `SYCL0` in the device list.
+
+**"failed to sample token"** — Usually means an ABI mismatch between ggml-sycl and ollama's vendored ggml. The `GGML_COMMIT` ARG in the Dockerfile must match the ggml version ollama vendors.
+
+**Model too large for VRAM** — Intel integrated GPUs share system memory. Increase `shm_size` in `docker-compose.yml` or use a smaller quantization (Q4_0, Q4_K_M).
+
+**Slow first inference** — SYCL JIT-compiles GPU kernels on first run. Subsequent inferences are faster.
+
+---
 
 ## References
 
-* [Intel GPU driver installation](https://dgpu-docs.intel.com/driver/client/overview.html)
-* [llama.cpp SYCL backend docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/SYCL.md)
-* [Intel oneAPI base toolkit](https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit.html)
-* [ollama GitHub](https://github.com/ollama/ollama)
-* [Open WebUI](https://github.com/open-webui/open-webui)
+- [Ollama](https://github.com/ollama/ollama)
+- [Open WebUI](https://github.com/open-webui/open-webui)
+- [llama.cpp SYCL backend](https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/SYCL.md)
+- [Intel oneAPI base toolkit](https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit.html)
+- [Intel GPU driver installation](https://dgpu-docs.intel.com/driver/client/overview.html)
+
+---
+
+## License
+
+See [LICENSE](LICENSE) for details.

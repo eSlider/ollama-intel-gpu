@@ -1,40 +1,36 @@
 # Changelog
 
-## 2026-02-12
+## 2026-02-12 — Switch to SYCL backend
 
-### Fix: Ollama not reachable from host via Docker port mapping
+### GPU backend: Vulkan -> SYCL
 
-The bundled IPEX-LLM `/start-ollama.sh` entrypoint hardcodes
-`OLLAMA_HOST='127.0.0.1:11434'` and `OLLAMA_KEEP_ALIVE=10m`, overriding any
-values set through Docker Compose environment variables.
+- Replaced Vulkan GPU backend with custom-built SYCL backend for ~2x inference
+  speed on Intel GPUs
+- Multi-stage Dockerfile: builds `libggml-sycl.so` from upstream llama.cpp
+  (commit `a5bb8ba4`) using Intel oneAPI 2025.1.1
+- Added `patch-sycl.py` to fix two ollama-specific API divergences:
+  - `graph_compute` signature (`int batch_size` parameter)
+  - `GGML_TENSOR_FLAG_COMPUTE` removal (critical — without this patch all
+    compute nodes are skipped, producing garbage output)
+- Bundled oneAPI runtime libraries (SYCL, oneMKL, oneDNN, TBB, Level-Zero)
+  into the runtime image
 
-- Added a custom `start-ollama.sh` that respects environment variables
-  (`${OLLAMA_HOST:-0.0.0.0:11434}`, `${OLLAMA_KEEP_ALIVE:-24h}`) instead of
-  hardcoding them
-- Mounted the script into the container as a read-only volume
-  (`./start-ollama.sh:/start-ollama.sh:ro`)
-- Fixed `LD_LIBRARY_PATH` env var syntax in docker-compose.yml (`:` -> `=`)
+### Ollama upgrade: 0.9.3 -> 0.15.6
 
-### Updated Intel GPU runtime stack to latest releases
+- Upgraded from IPEX-LLM bundled ollama 0.9.3 to official ollama v0.15.6
+- Switched from IPEX-LLM portable zip to official ollama binary
+- Removed CUDA/MLX/Vulkan runners from image to reduce size
+
+### Intel GPU runtime stack
 
 - **level-zero**: v1.22.4 -> v1.28.0
-  - Loader based on oneAPI Level Zero Specification v1.15.31
-  - Memory leak fixes, expanded multidriver teardown support
-- **intel-graphics-compiler (IGC)**: v2.11.7 (build 19146) -> v2.28.4 (build 20760)
-  - Built with LLVM 16.0.6, opaque pointers support
+- **intel-graphics-compiler (IGC)**: v2.11.7 -> v2.28.4
 - **compute-runtime**: 25.18.33578.6 -> 26.05.37020.3
-  - Built with IGC v2.28.4 and level-zero v1.27.0
-  - Panther Lake production support, Wildcat Lake pre-release
 - **libigdgmm**: 22.7.0 -> 22.9.0
-- **ipex-llm ollama** (nightly): 2.3.0b20250612 -> 2.3.0b20250725
-  - Latest available nightly Ubuntu ollama portable zip
 
-### Docker Compose adjustments
+### Docker Compose
 
-- Disabled persistent webui volume for stateless restarts
+- Device mapping changed to full `/dev/dri` access for SYCL/Level-Zero
+- Added `ONEAPI_DEVICE_SELECTOR=level_zero:0` and `ZES_ENABLE_SYSMAN=1`
+- Removed `OLLAMA_VULKAN=1`
 - Disabled web UI authentication (`WEBUI_AUTH=False`)
-
-### README
-
-- Formatting and heading structure improvements
-- Updated tested GPU model to Intel Core Ultra 5 155H
