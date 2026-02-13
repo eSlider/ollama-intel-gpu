@@ -1,11 +1,40 @@
 # Ollama for Intel GPU (SYCL)
 
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker)](https://docs.docker.com/compose/)
+[![Ollama](https://img.shields.io/badge/Ollama-v0.15.6-black.svg)](https://ollama.com)
+[![Intel oneAPI](https://img.shields.io/badge/Intel%20oneAPI-2025.1-0071C5.svg?logo=intel)](https://www.intel.com/content/www/us/en/developer/tools/oneapi/overview.html)
+[![SYCL](https://img.shields.io/badge/SYCL-Backend-00ADD8.svg)](https://www.khronos.org/sycl/)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04+-E95420.svg?logo=ubuntu&logoColor=white)](https://ubuntu.com)
+[![GitHub Stars](https://img.shields.io/github/stars/eSlider/ollama-intel-gpu?style=social)](https://github.com/eSlider/ollama-intel-gpu/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/eSlider/ollama-intel-gpu?style=social)](https://github.com/eSlider/ollama-intel-gpu/network/members)
+
 > Run LLMs on Intel GPUs at full speed — no NVIDIA required.
 
 A Docker-based setup that pairs [Ollama](https://github.com/ollama/ollama) **v0.15.6** with a custom-built **SYCL backend** for Intel GPU acceleration, plus [Open WebUI](https://github.com/open-webui/open-webui) for a browser chat interface. Three commands to go from zero to local AI.
 
 **Why this exists:** Ollama's official release ships only a Vulkan backend for Intel GPUs, leaving significant performance on the table. This repo builds the `ggml-sycl` backend from source with Intel oneAPI, unlocking oneMKL, oneDNN, and Level-Zero direct GPU access.
 
+### Go API Client
+
+Use [go-ollama](https://github.com/eSlider/go-ollama) to integrate this Ollama instance into your Go applications:
+
+```bash
+go get github.com/eslider/go-ollama
+```
+
+```go
+client := ollama.NewOpenWebUiClient(&ollama.DSN{
+    URL: "http://localhost:11434/api/generate",
+})
+client.Query(ollama.Request{
+    Model: "llama3.2:3b", Prompt: "Explain SYCL in one paragraph",
+    OnJson: func(res ollama.Response) error {
+        fmt.Print(*res.Response)
+        return nil
+    },
+})
+```
 
 ---
 
@@ -153,6 +182,15 @@ Environment variables in `docker-compose.yml`:
 - [llama.cpp SYCL backend](https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/SYCL.md)
 - [Intel oneAPI base toolkit](https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit.html)
 - [Intel GPU driver installation](https://dgpu-docs.intel.com/driver/client/overview.html)
+
+## Related Projects
+
+| Project | Description |
+|---|---|
+| [go-ollama](https://github.com/eSlider/go-ollama) | Go API client for Ollama/Open WebUI with streaming |
+| [go-matrix-bot](https://github.com/eSlider/go-matrix-bot) | Matrix chat bot powered by Ollama AI |
+| [go-trade](https://github.com/eSlider/go-trade) | Unified trade data model across exchanges |
+| [go-onlyoffice](https://github.com/eSlider/go-onlyoffice) | OnlyOffice Project Management API client |
 
 ---
 
