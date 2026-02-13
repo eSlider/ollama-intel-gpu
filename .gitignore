@@ -1,0 +1,9 @@
+# IDE
+.idea/
+
+# Swap files
+*.swp
+*.swo
+
+# Open WebUI local data
+webui/

@@ -1,68 +1,145 @@
-FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=america/los_angeles
+# =============================================================================
+# Stage 1: Build ggml-sycl backend from ollama's ggml source using Intel oneAPI
+# =============================================================================
+FROM intel/oneapi-basekit:2025.1.1-0-devel-ubuntu24.04 AS sycl-builder
+
+ARG OLLAMA_VERSION=0.15.6
+
+# Clone ollama source and the MATCHING ggml-sycl source from upstream llama.cpp.
+# ollama v0.15.6 vendors ggml at commit a5bb8ba4 — we MUST use the same commit
+# to ensure struct layouts, operation enums, and internal APIs match exactly.
+# (ollama excludes ggml-sycl from its vendored ggml, but keeps the header)
+ARG GGML_COMMIT=a5bb8ba4c50257437630c136210396810741bbf7
+RUN git clone --depth 1 --branch v${OLLAMA_VERSION} \
+    https://github.com/ollama/ollama.git /ollama && \
+    git init /tmp/llama.cpp && \
+    cd /tmp/llama.cpp && \
+    git remote add origin https://github.com/ggml-org/llama.cpp.git && \
+    git sparse-checkout set ggml/src/ggml-sycl && \
+    git fetch --depth 1 origin ${GGML_COMMIT} && \
+    git checkout FETCH_HEAD && \
+    cp -r /tmp/llama.cpp/ggml/src/ggml-sycl \
+          /ollama/ml/backend/ggml/ggml/src/ggml-sycl && \
+    rm -rf /tmp/llama.cpp
+
+WORKDIR /ollama
+
+# Patch ggml-sycl to match ollama's modified ggml backend API:
+# 1. graph_compute has an extra int batch_size parameter in ollama
+# 2. GGML_TENSOR_FLAG_COMPUTE doesn't exist in ollama's ggml
+COPY patch-sycl.py /tmp/patch-sycl.py
+RUN python3 /tmp/patch-sycl.py ml/backend/ggml/ggml/src/ggml-sycl/ggml-sycl.cpp
+
+# Build the SYCL backend as a dynamic library
+# Note: oneAPI env is already set in the base image, no need to source setvars.sh
+RUN cmake -B build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=icx \
+      -DCMAKE_CXX_COMPILER=icpx \
+      -DGGML_SYCL=ON \
+      -DGGML_SYCL_TARGET=INTEL \
+      -DOLLAMA_RUNNER_DIR=sycl && \
+    cmake --build build --parallel $(nproc) --target ggml-sycl
+
+# Collect the SYCL runner and its oneAPI runtime dependencies into /sycl-runner
+RUN mkdir -p /sycl-runner && \
+    cp build/lib/ollama/libggml-sycl.so /sycl-runner/ && \
+    # SYCL / DPC++ runtime
+    cp /opt/intel/oneapi/compiler/latest/lib/libsycl.so* /sycl-runner/ && \
+    # Unified Runtime (oneAPI 2025+) — search multiple possible locations
+    find /opt/intel/oneapi -name 'libur_loader.so*' | head -3 | xargs -I{} cp {} /sycl-runner/ && \
+    find /opt/intel/oneapi -name 'libur_adapter_level_zero.so*' | head -3 | xargs -I{} cp {} /sycl-runner/ && \
+    find /opt/intel/oneapi -maxdepth 4 -name 'libumf.so*' | head -3 | xargs -I{} cp {} /sycl-runner/ && \
+    # oneDNN
+    cp /opt/intel/oneapi/dnnl/latest/lib/libdnnl.so* /sycl-runner/ 2>/dev/null; \
+    # oneMKL
+    cp /opt/intel/oneapi/mkl/latest/lib/libmkl_core.so* /sycl-runner/ && \
+    cp /opt/intel/oneapi/mkl/latest/lib/libmkl_intel_ilp64.so* /sycl-runner/ && \
+    cp /opt/intel/oneapi/mkl/latest/lib/libmkl_sycl_blas.so* /sycl-runner/ && \
+    cp /opt/intel/oneapi/mkl/latest/lib/libmkl_tbb_thread.so* /sycl-runner/ && \
+    # TBB
+    cp /opt/intel/oneapi/tbb/latest/lib/intel64/gcc*/libtbb.so* /sycl-runner/ && \
+    # Intel compiler runtime
+    cp /opt/intel/oneapi/compiler/latest/lib/libsvml.so /sycl-runner/ && \
+    cp /opt/intel/oneapi/compiler/latest/lib/libimf.so /sycl-runner/ && \
+    cp /opt/intel/oneapi/compiler/latest/lib/libintlc.so* /sycl-runner/ && \
+    cp /opt/intel/oneapi/compiler/latest/lib/libirng.so /sycl-runner/ && \
+    cp /opt/intel/oneapi/compiler/latest/lib/libiomp5.so /sycl-runner/ && \
+    # Level-zero PI plugin (legacy, may not exist)
+    cp /opt/intel/oneapi/compiler/latest/lib/libpi_level_zero.so* /sycl-runner/ 2>/dev/null; \
+    # SYCL SPIR-V fallback kernels (needed for bfloat16, complex math, etc.)
+    cp /opt/intel/oneapi/compiler/latest/lib/libsycl-fallback*.spv /sycl-runner/ && \
+    # Strip debug symbols to reduce size
+    strip --strip-unneeded /sycl-runner/*.so* 2>/dev/null; true
+
+# =============================================================================
+# Stage 2: Runtime image
+# =============================================================================
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=America/Los_Angeles
 
 # Base packages
-RUN apt update && \
-    apt install --no-install-recommends -q -y \
-    software-properties-common \
-    ca-certificates \
-    gnupg \
-    wget \
-    curl \
-    python3 \
-    python3-pip \
-    ocl-icd-libopencl1
+RUN apt-get update && \
+    apt-get install --no-install-recommends -q -y \
+      ca-certificates \
+      wget \
+      zstd \
+      ocl-icd-libopencl1 \
+      libhwloc15 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Intel GPU compute user-space drivers
-RUN mkdir -p /tmp/gpu && \
- cd /tmp/gpu && \
- wget https://github.com/oneapi-src/level-zero/releases/download/v1.18.3/level-zero_1.18.3+u22.04_amd64.deb && \
- wget https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17791.9/intel-igc-core_1.0.17791.9_amd64.deb && \
- wget https://github.com/intel/intel-graphics-compiler/releases/download/igc-1.0.17791.9/intel-igc-opencl_1.0.17791.9_amd64.deb && \
- wget https://github.com/intel/compute-runtime/releases/download/24.39.31294.12/intel-level-zero-gpu_1.6.31294.12_amd64.deb && \
- wget https://github.com/intel/compute-runtime/releases/download/24.39.31294.12/intel-opencl-icd_24.39.31294.12_amd64.deb && \
- wget https://github.com/intel/compute-runtime/releases/download/24.39.31294.12/libigdgmm12_22.5.2_amd64.deb && \
- dpkg -i *.deb && \
- rm *.deb
+# Intel GPU runtimes (release 26.05.37020.3)
+# Provides level-zero, IGC, compute-runtime for Intel GPU kernel support
+RUN mkdir -p /tmp/gpu && cd /tmp/gpu && \
+    wget https://github.com/oneapi-src/level-zero/releases/download/v1.28.0/level-zero_1.28.0+u24.04_amd64.deb && \
+    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.28.4/intel-igc-core-2_2.28.4+20760_amd64.deb && \
+    wget https://github.com/intel/intel-graphics-compiler/releases/download/v2.28.4/intel-igc-opencl-2_2.28.4+20760_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-ocloc-dbgsym_26.05.37020.3-0_amd64.ddeb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-ocloc_26.05.37020.3-0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/intel-opencl-icd_26.05.37020.3-0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/libigdgmm12_22.9.0_amd64.deb && \
+    wget https://github.com/intel/compute-runtime/releases/download/26.05.37020.3/libze-intel-gpu1_26.05.37020.3-0_amd64.deb && \
+    dpkg -i *.deb *.ddeb && rm -rf /tmp/gpu
 
-# Required compute runtime level-zero variables
-ENV ZES_ENABLE_SYSMAN=1
+# Install official ollama binary + CPU runners (skip CUDA/MLX/Vulkan)
+ARG OLLAMA_VERSION=0.15.6
+RUN wget -qO- "https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst" | \
+    zstd -d | tar -xf - -C /usr && \
+    rm -rf /usr/lib/ollama/cuda_* /usr/lib/ollama/mlx_* /usr/lib/ollama/vulkan
 
-# oneAPI 
-RUN wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | \
-   gpg --dearmor --output /usr/share/keyrings/oneapi-archive-keyring.gpg && \
-   echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | \
-   tee /etc/apt/sources.list.d/oneAPI.list && \
-  apt update && \
-  apt install --no-install-recommends -q -y \
-    intel-oneapi-common-vars=2024.0.0-49406 \
-    intel-oneapi-common-oneapi-vars=2024.0.0-49406 \
-    intel-oneapi-compiler-dpcpp-cpp=2024.0.2-49895 \
-    intel-oneapi-dpcpp-ct=2024.0.0-49381 \
-    intel-oneapi-mkl=2024.0.0-49656 \
-    intel-oneapi-mpi=2021.11.0-49493 \
-    intel-oneapi-dal=2024.0.1-25 \
-    intel-oneapi-ippcp=2021.9.1-5 \
-    intel-oneapi-ipp=2021.10.1-13 \
-    intel-oneapi-tlt=2024.0.0-352 \
-    intel-oneapi-ccl=2021.11.2-5 \
-    intel-oneapi-dnnl=2024.0.0-49521 \
-    intel-oneapi-tcm-1.0=1.0.0-435
+# Install SYCL runner from build stage
+COPY --from=sycl-builder /sycl-runner/ /usr/lib/ollama/sycl/
 
-# Required oneAPI environment variables
-ENV USE_XETLA=OFF
-ENV SYCL_PI_LEVEL_ZERO_USE_IMMEDIATE_COMMANDLISTS=1
-ENV SYCL_CACHE_PERSISTENT=1
+# Clean up
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    apt-get autoremove -y --purge 2>/dev/null; \
+    apt-get autoclean -y 2>/dev/null; true
 
-COPY _init.sh /usr/share/lib/init_workspace.sh
-COPY _run.sh /usr/share/lib/run_workspace.sh
-
-# Ollama via ipex-llm 
-RUN pip3 install --pre --upgrade ipex-llm[cpp] 
-
-ENV OLLAMA_NUM_GPU=999
+# Serve ollama on all interfaces
 ENV OLLAMA_HOST=0.0.0.0:11434
 
-ENTRYPOINT ["/bin/bash", "/usr/share/lib/run_workspace.sh"]
+# Keep models loaded in memory
+ENV OLLAMA_KEEP_ALIVE=24h
+ENV OLLAMA_DEFAULT_KEEPALIVE=6h
 
+# Concurrency and resource limits
+ENV OLLAMA_NUM_PARALLEL=1
+ENV OLLAMA_MAX_LOADED_MODELS=1
+ENV OLLAMA_MAX_QUEUE=512
+ENV OLLAMA_MAX_VRAM=0
+
+# Use all GPU layers
+ENV OLLAMA_NUM_GPU=999
+
+# Intel GPU tuning
+ENV ZES_ENABLE_SYSMAN=1
+ENV ONEAPI_DEVICE_SELECTOR=level_zero:0
+
+# For Intel Core Ultra Processors (Series 1), code name Meteor Lake
+ENV IPEX_LLM_NPU_MTL=1
+
+EXPOSE 11434
+ENTRYPOINT ["/usr/bin/ollama"]
+CMD ["serve"]
