@@ -45,7 +45,6 @@ RUN cmake -B build \
 RUN mkdir -p /sycl-runner && \
     cp build/lib/ollama/libggml-sycl.so /sycl-runner/ && \
     # SYCL / DPC++ runtime
-    for f in libsycl.so*; do true; done && \
     cp /opt/intel/oneapi/compiler/latest/lib/libsycl.so* /sycl-runner/ && \
     # Unified Runtime (oneAPI 2025+) — search multiple possible locations
     find /opt/intel/oneapi -name 'libur_loader.so*' | head -3 | xargs -I{} cp {} /sycl-runner/ && \
